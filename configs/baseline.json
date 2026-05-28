@@ -1,0 +1,12 @@
+{
+  "config_id": "baseline",
+  "cycle_length": 60,
+  "green_ns": 30,
+  "green_ew": 25,
+  "yellow_time": 3,
+  "all_red_time": 2,
+  "offset": 0,
+  "traffic_level": "medium",
+  "simulation_duration": 3600,
+  "seed": 123
+}
