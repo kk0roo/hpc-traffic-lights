@@ -1,0 +1,314 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage{siunitx}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage{caption}
+
+\graphicspath{{../results/plots/}}
+
+\title{\textbf{Parallel Traffic-Light Optimization on an HPC Cluster}\\
+\large Large Scale Computing --- Project Report}
+\author{Grzegorz Mróz and Katarzyna Kucharzyk}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This project uses traffic-light timing optimization as a realistic, embarrassingly
+parallel workload to demonstrate core High Performance Computing (HPC) concepts:
+SLURM job arrays, parallel scaling, search-strategy comparison, parameter
+sensitivity analysis, and an idealized Monte Carlo baseline. Every candidate
+traffic-light configuration is evaluated by an independent simulation, which makes
+the workload trivially parallelizable across the nodes of the PLGrid/Ares cluster.
+We report four experiments. The scaling study confirms near-linear speedup
+(efficiency $\geq 91\%$ up to $100$ workers). An evolutionary algorithm (EA)
+outperforms random and grid search at an equal simulation budget, reducing the
+mean objective by roughly $6\times$ and cutting average vehicle waiting time by
+$10.7\%$ relative to a hand-crafted fixed-time baseline. A sensitivity sweep shows that, for a fixed
+budget, more generations beat larger populations. Finally, a Monte Carlo
+$\pi$-estimator on $5\times10^{7}$ samples illustrates perfect parallelism with
+zero inter-task communication.
+\end{abstract}
+
+\section{Introduction}
+
+Optimizing the timing of traffic lights is computationally expensive because each
+candidate configuration must be evaluated in a traffic simulation. Since the
+configurations are mutually independent, the search is an \emph{embarrassingly
+parallel} problem: thousands of simulations can run simultaneously with no
+communication between them. This makes traffic-light optimization an ideal
+vehicle for studying HPC batch processing.
+
+The goal of this project is \textbf{not} to build a production traffic controller,
+but to use a scalable prototype to demonstrate and measure HPC properties:
+how the workload scales with the number of workers, how different optimization
+strategies trade off quality against compute budget, and how an idealized parallel
+workload behaves as a reference point.
+
+\section{Methodology}
+
+\subsection{Traffic-light model and objective}
+
+Each intersection is controlled by a fixed-time signal program described by a JSON
+configuration with the following parameters: \texttt{cycle\_length}, North--South
+green time (\texttt{green\_ns}), East--West green time (\texttt{green\_ew}),
+\texttt{yellow\_time}, \texttt{all\_red\_time}, and a coordination \texttt{offset}.
+All configurations satisfy the timing constraint
+\[
+\texttt{green\_ns} + \texttt{green\_ew} + 2\cdot\texttt{yellow\_time}
++ 2\cdot\texttt{all\_red\_time} \;\leq\; \texttt{cycle\_length}.
+\]
+The optimization objective is to \textbf{minimize the average vehicle waiting time}
+($\texttt{avg\_waiting\_time}$, in seconds) over a one-hour simulated horizon on a
+$3\times3$ grid of intersections under medium traffic demand.
+
+\subsection{Simulation backends}
+
+The architecture follows one strict rule: \emph{nothing outside the simulator
+module knows how a backend works internally}. Every backend consumes one JSON
+config and emits exactly one CSV row with a fixed metric schema. Three backends
+are provided:
+\begin{itemize}
+  \item \texttt{python} --- a discrete-time queueing model of the intersections.
+        Fast ($\sim$\SI{7}{\milli\second} per simulation) and dependency-free.
+  \item \texttt{sumo} --- a microscopic simulation using the SUMO traffic
+        simulator ($\sim$\SI{1.4}{\second} per simulation). Used here for
+        visualization.
+  \item \texttt{mc} --- a Monte Carlo $\pi$-estimator used as an idealized
+        embarrassingly-parallel reference.
+\end{itemize}
+Because all backends share the same input/output contract, the SLURM workflow,
+aggregation, and analysis code are backend-agnostic. The four headline
+experiments were executed on Ares with the \texttt{python} backend (SUMO was not
+available in the cluster module environment); the SUMO backend was used locally
+to render the traffic animation.
+
+\subsection{HPC execution model}
+
+Each simulation is one task of a SLURM \emph{job array}. Concurrency is controlled
+with the array throttle (\texttt{--array=0-P\%N}), which limits how many of the
+$P$ tasks run simultaneously to $N$. Results are written as independent CSV files
+and aggregated afterwards, so there is no shared state and no synchronization
+during evaluation. The EA introduces the only synchronization point: a barrier
+between generations, where the next population is bred from the evaluated parents.
+
+\section{Experiment 1: Parallel Scaling}
+
+\paragraph{Setup.} A fixed workload of $P=100$ configurations is evaluated while
+varying the number of concurrent workers $N \in \{1,2,5,10,20,50,100\}$ (strong
+scaling). Each task records its own runtime. The wall-clock time for $N$ workers
+is modelled as the makespan of scheduling the measured per-task runtimes onto $N$
+workers (longest-processing-time greedy schedule); the sequential baseline $T(1)$
+is the sum of all task runtimes. Speedup is $S(N)=T(1)/T(N)$ and efficiency is
+$E(N)=S(N)/N$.
+
+\begin{table}[H]
+\centering
+\caption{Strong-scaling results ($P=100$ tasks).}
+\begin{tabular}{rrrr}
+\toprule
+Workers $N$ & Wall time $T(N)$ [s] & Speedup $S(N)$ & Efficiency $E(N)$ \\
+\midrule
+1   & 0.6875 & 1.00  & 100.0\% \\
+2   & 0.3438 & 2.00  & 100.0\% \\
+5   & 0.1376 & 5.00  & 99.9\%  \\
+10  & 0.0688 & 9.99  & 99.9\%  \\
+20  & 0.0345 & 19.93 & 99.6\%  \\
+50  & 0.0139 & 49.46 & 98.9\%  \\
+100 & 0.0075 & 91.67 & 91.7\%  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{scaling.png}
+\caption{Strong scaling. Left: measured speedup tracks the ideal linear curve
+almost exactly. Right: parallel efficiency stays above $98\%$ up to $N=50$ and
+only drops to $91.7\%$ at $N=100$, where granularity (one task per worker) makes
+load imbalance unavoidable.}
+\end{figure}
+
+\paragraph{Discussion.} The workload exhibits essentially ideal strong scaling, as
+expected for an embarrassingly parallel problem: there is no inter-task
+communication, so the only loss of efficiency comes from load granularity. At
+$N=100$ each worker handles a single task, so the longest task dictates the
+makespan and efficiency falls to $91.7\%$ --- a textbook illustration of why the
+number of tasks should comfortably exceed the number of workers.
+
+\section{Experiment 2: EA vs.\ Random vs.\ Grid Search}
+
+\paragraph{Setup.} Three search strategies are compared: \emph{random search}
+(300 random configs), \emph{grid search} (a regular lattice over cycle length and
+green splits, 72 points --- the natural resolution of the grid before
+combinatorial blow-up), and an \emph{evolutionary algorithm} (population of 50
+over 6 generations, i.e.\ 300 evaluations). Random search and the EA thus operate
+on an equal budget of 300 evaluations, while grid search samples the space more
+sparsely. Quality is the best/mean/worst $\texttt{avg\_waiting\_time}$. As an
+absolute reference we also report a hand-crafted \emph{fixed-time baseline}
+(\SI{60}{\second} cycle, $30/25$ green split, zero offset), evaluated on the same
+backend and demand.
+
+\begin{table}[H]
+\centering
+\caption{Search-strategy comparison (avg.\ waiting time, seconds; lower is
+better). EA statistics describe the final-generation population of 50
+individuals; its total budget is 300 evaluations.}
+\begin{tabular}{lrrrr}
+\toprule
+Strategy & Evaluations & Best & Mean & Worst \\
+\midrule
+Fixed-time baseline & 1 & 12.25 & --- & --- \\
+Random search & 300 & 11.03 & 212.87 & 1070.36 \\
+Grid search   & 72  & 11.55 & 138.40 & 710.20  \\
+Evolutionary algorithm & 300 (50 $\times$ 6 gen.) & \textbf{10.94} & \textbf{33.94} & \textbf{366.89} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{search_comparison.png}
+\caption{Left: best/mean/worst objective per strategy. Middle: cumulative
+distribution of solution quality --- the EA curve rises fastest, i.e.\ it produces
+far fewer poor solutions. Right: best-so-far learning curve against the number of
+simulations.}
+\end{figure}
+
+\paragraph{Discussion.} All three strategies find a similar \emph{best} solution
+($\approx$\SI{11}{\second}), because good configurations are not especially rare.
+The decisive difference is the \emph{distribution}: the EA's mean objective
+(\SI{33.9}{\second}) is about $6\times$ lower than random search
+(\SI{212.9}{\second}) and $4\times$ lower than grid search, and its worst case is
+roughly $3\times$ better. The CDF makes this explicit --- the EA concentrates its
+budget in the high-quality region instead of wasting evaluations on poor
+candidates. For a fixed compute budget, the EA therefore extracts substantially
+more value, which is the central motivation for using guided search on HPC.
+Grid search received fewer evaluations than the other two methods, but this only
+strengthens the conclusion for random search (equal budget, $6\times$ worse mean)
+and does not change the ranking: the EA dominates on every reported statistic.
+
+\paragraph{Practical payoff.} Measured against the fixed-time baseline
+(\SI{12.25}{\second} average waiting under identical demand --- 3262 vs.\ 3268
+vehicle arrivals), the best evolved configuration achieves
+\SI{10.94}{\second}, i.e.\ a $\mathbf{10.7\%}$ \textbf{reduction in average
+vehicle waiting time}. This is the bottom line of the optimization: a sensibly
+hand-tuned signal plan is already decent, yet a few CPU-minutes of parallel
+guided search buy a double-digit relative improvement.
+
+\section{Experiment 3: EA Parameter Sensitivity}
+
+\paragraph{Setup.} The EA budget is fixed at 300 evaluations and split between
+population size and number of generations in seven ways, from $300\times1$
+(pure random) to $15\times20$ (deep, narrow search).
+
+\begin{table}[H]
+\centering
+\caption{EA sensitivity at a fixed budget of 300 evaluations.}
+\begin{tabular}{rrr}
+\toprule
+Population & Generations & Best avg.\ waiting time [s] \\
+\midrule
+300 & 1  & 11.03 \\
+150 & 2  & 11.45 \\
+100 & 3  & 11.47 \\
+60  & 5  & 10.88 \\
+50  & 6  & 11.51 \\
+30  & 10 & 10.61 \\
+15  & 20 & \textbf{10.55} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{sensitivity.png}
+\caption{Left: best-fitness convergence per configuration. Middle and right: final
+best objective as a function of population size and of the number of generations.}
+\end{figure}
+
+\paragraph{Discussion.} At a fixed budget there is a clear exploration vs.\
+exploitation trade-off. Configurations with a single generation ($300\times1$,
+equivalent to random search) and very large populations leave quality on the
+table, whereas allocating the budget to \emph{more generations}
+($15\times20$, $30\times10$) yields the best results. This indicates that
+iterative selection pressure --- not raw population diversity --- drives
+improvement for this problem. The differences are modest (all within
+$\approx$\SI{1}{\second}), reflecting that the EA used here has no elitism, so the
+incumbent best can be lost between generations; adding elitism is the natural next
+improvement.
+
+\section{Experiment 4: Monte Carlo $\pi$ --- An Idealized Parallel Baseline}
+
+\paragraph{Setup.} As a reference for ``perfect'' parallelism, 500 independent
+tasks each draw $10^{5}$ random points in the unit square and count those inside
+the quarter circle, giving $\pi \approx 4\,(\text{hits}/\text{samples})$. The
+combined estimate uses $5\times10^{7}$ samples. Unlike the EA, there is no
+synchronization barrier whatsoever.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{mc_convergence.png}
+\caption{Left: running estimate of $\pi$ converging to the true value within its
+theoretical $95\%$ confidence band. Middle: absolute error vs.\ number of tasks on
+log--log axes, following the expected $1/\sqrt{N}$ trend. Right: speedup ---
+Monte Carlo is linear (no communication) while the EA's per-generation barrier
+limits its scaling.}
+\end{figure}
+
+\paragraph{Results.} The aggregate estimate is $\pi \approx 3.141626$ versus the
+true $3.141593$, an absolute error of $3.3\times10^{-5}$, consistent with the
+$1/\sqrt{N}$ law. This experiment isolates the ideal case: speedup is perfectly
+linear because tasks never communicate, in contrast to the EA, whose generation
+barrier introduces a (small) serial fraction and caps achievable speedup ---
+a concrete illustration of Amdahl's law.
+
+\section{Visualization}
+
+The SUMO backend produces per-vehicle traces that are rendered into an animation
+of the optimized $3\times3$ grid (\texttt{results/plots/anim\_best.gif}).
+Figure~\ref{fig:anim} shows a representative frame: cyan markers indicate active
+green phases and red markers show queued vehicles waiting at red lights.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.65\linewidth]{anim_best_frame.png}
+\caption{Snapshot of the SUMO microsimulation for the best configuration
+($t=\SI{900}{\second}$, 58 vehicles in the network).}
+\label{fig:anim}
+\end{figure}
+
+\section{Conclusions}
+
+\begin{itemize}
+  \item \textbf{Embarrassingly parallel, near-ideal scaling.} The simulation
+        workload scales almost linearly, with efficiency above $98\%$ up to 50
+        workers; the only loss comes from task granularity at $N=100$.
+  \item \textbf{Guided search wins at equal cost.} The EA delivers a $\sim6\times$
+        lower mean objective and a markedly better worst case than random or grid
+        search for the same simulation budget.
+  \item \textbf{Optimization pays off in traffic terms.} The best evolved signal
+        plan reduces average vehicle waiting time by $10.7\%$ relative to a
+        hand-crafted fixed-time baseline ($12.25 \rightarrow$ \SI{10.94}{\second}).
+  \item \textbf{Spend budget on iterations.} Under a fixed budget, more
+        generations outperform larger populations, highlighting the value of
+        selection pressure.
+  \item \textbf{Synchronization has a cost.} The communication-free Monte Carlo
+        baseline scales perfectly, whereas the EA's generation barrier introduces
+        a serial fraction --- a practical demonstration of Amdahl's law.
+\end{itemize}
+
+Overall, the project shows how a realistic optimization problem maps cleanly onto
+HPC batch infrastructure and how the choice of algorithm, not just raw compute,
+determines the value obtained from a fixed allocation of CPU hours.
+
+\end{document}

@@ -1,16 +1,3 @@
-"""Select the best traffic-light configuration from aggregated results.
-
-"Best" means the row with the minimum value of the chosen metric (lower is
-better for waiting time, queue length, etc.) among rows whose status is "ok".
-
-Example
--------
-    python src/select_best.py \
-        --results results/all_results.csv \
-        --output results/best_config.json \
-        --metric avg_waiting_time
-"""
-
 import argparse
 import os
 import sys
@@ -23,7 +10,6 @@ from utils.io import ensure_dir, save_json
 
 
 def select_best(results_path, metric):
-    """Return (best_row_dict, n_candidates) for the given metric."""
     if not os.path.exists(results_path):
         raise SystemExit(f"ERROR: results file not found: {results_path}")
 

@@ -1,33 +1,14 @@
-"""Lightweight orchestration helper.
-
-This is intentionally NOT a heavy optimizer. The real "optimization" in this
-project is a random search executed massively in parallel via SLURM array jobs
-(one configuration per array task). This helper exists to:
-
-  * generate a batch of configurations, and
-  * optionally run a small sequential test locally (no cluster needed) so you
-    can verify the whole pipeline on your laptop before submitting to SLURM.
-
-Examples
-    # Just generate configs (then submit slurm/run_array.sh on the cluster):
-    python src/optimize.py --mode generate --n-configs 100
-
-    # Generate a few configs AND evaluate them locally in sequence:
-    python src/optimize.py --mode local-test --n-configs 5
-"""
-
 import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from generate_configs import generate_configs  # noqa: E402
-from simulators.python_simulator import PythonSimulator  # noqa: E402
+from generate_configs import generate_configs
+from simulators.python_simulator import PythonSimulator
 
 
 def run_local_test(n_configs, config_dir, results_dir, seed, traffic_level, network, demand):
-    """Generate and sequentially evaluate ``n_configs`` configurations locally."""
     paths = generate_configs(
         n_configs=n_configs,
         output_dir=config_dir,

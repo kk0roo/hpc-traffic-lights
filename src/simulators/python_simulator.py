@@ -1,22 +1,3 @@
-"""Simple discrete-time queueing simulator for a single signalised intersection.
-
-This is the default backend. Simple and readable rather
-than physically accurate. The goal is to provide a deterministic, CPU-bound
-workload whose result depends on the traffic-light configuration, so that
-evaluating many configurations in parallel on an HPC cluster is meaningful.
-
-Summary of the model assumptions:
-* Time step = 1 second.
-* Four incoming directions: N, S, E, W (queues of waiting vehicles).
-* The signal cycle has two green phases separated by lost time:
-      NS green -> lost (yellow + all-red) -> EW green -> lost -> remainder lost
-* NS green serves the N and S queues; EW green serves the E and W queues.
-* During lost time (yellow / all-red / leftover) no vehicle is served.
-* Arrivals are drawn deterministically from ``random.Random(seed)``.
-
-See ``compute_metrics`` for how the reported metrics are derived.
-"""
-
 import csv
 import time
 from typing import Optional
@@ -25,11 +6,8 @@ from utils.io import ensure_dir, load_json
 from utils.metrics import RESULT_COLUMNS
 from simulators.base import SimulationBackend
 
-# How many vehicles a single approach can discharge per second of green light:
 SERVICE_RATE_PER_SECOND = 1
 
-# Expected vehicles per second per direction - used when
-# no demand file is supplied - and indexed by traffic level
 DEFAULT_ARRIVAL_RATES = {
     "low": {"N": 0.10, "S": 0.10, "E": 0.12, "W": 0.12},
     "medium": {"N": 0.20, "S": 0.20, "E": 0.25, "W": 0.25},
@@ -42,11 +20,6 @@ EW_DIRECTIONS = {"E", "W"}
 
 
 def _sample_arrivals(rate, rng):
-    """Return an integer number of arrivals for a given expected ``rate``.
-    This is a simple way to introduce some randomness while ensuring that the
-    expected number of arrivals is correct. For example, a rate of 0.3 would
-    yield 1 arrival with probability 0.3 and 0 arrivals with probability 0.7.
-    """
     base = int(rate)
     frac = rate - base
     if frac > 0 and rng.random() < frac:
@@ -55,9 +28,6 @@ def _sample_arrivals(rate, rng):
 
 
 def _served_directions(cycle_pos, green_ns, green_ew, lost_time):
-    """Return the set of directions served at a given position in the cycle.
-    Returns an empty set during lost time (yellow / all-red / leftover).
-    """
     ns_end = green_ns
     ew_start = green_ns + lost_time
     ew_end = ew_start + green_ew
@@ -69,20 +39,15 @@ def _served_directions(cycle_pos, green_ns, green_ew, lost_time):
 
 
 def _resolve_arrival_rates(config, demand):
-    """Pick arrival rates from the demand file if present, else from defaults."""
     if demand and "arrival_rates" in demand:
         rates = demand["arrival_rates"]
     else:
         level = config.get("traffic_level", "medium")
         rates = DEFAULT_ARRIVAL_RATES.get(level, DEFAULT_ARRIVAL_RATES["medium"])
-    # default 0.0 for a missing one
     return {d: float(rates.get(d, 0.0)) for d in DIRECTIONS}
 
 
 def simulate(config, demand=None):
-    """Run the queueing simulation and return a metrics dictionary.
-    ``config`` and ``demand`` are already-parsed dictionaries.
-    """
     import random
 
     cycle_length = int(config["cycle_length"])
@@ -117,9 +82,6 @@ def simulate(config, demand=None):
             queue_was_empty = queues[d] == 0
             queues[d] += arrivals
             total_arrivals += arrivals
-            # A vehicle "stops" if the light is red for it, or if it joins a
-            # queue that already had waiting vehicles. Vehicles arriving on a
-            # green, empty approach pass without stopping.
             if d not in served or not queue_was_empty:
                 total_stops += arrivals
 
@@ -153,7 +115,6 @@ def simulate(config, demand=None):
 
 
 def compute_metrics(config, demand, backend_name, runtime_seconds):
-    """Assemble the full result row (config echo + simulation metrics)."""
     sim = simulate(config, demand)
     row = {
         "config_id": config.get("config_id", ""),
@@ -175,7 +136,6 @@ def compute_metrics(config, demand, backend_name, runtime_seconds):
 
 
 def write_result_csv(row, output_path):
-    """Write a single result ``row`` to ``output_path`` using the shared schema."""
     ensure_dir(output_path)
     with open(output_path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=RESULT_COLUMNS)
@@ -184,8 +144,6 @@ def write_result_csv(row, output_path):
 
 
 class PythonSimulator(SimulationBackend):
-    """Default simulation backend implemented in pure Python."""
-
     name = "python"
 
     def run(
@@ -194,6 +152,7 @@ class PythonSimulator(SimulationBackend):
         output_path: str,
         network_path: Optional[str] = None,
         demand_path: Optional[str] = None,
+        fcd_output: Optional[str] = None,
     ) -> None:
         config = load_json(config_path)
         demand = load_json(demand_path) if demand_path else None

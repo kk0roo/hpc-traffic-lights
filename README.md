@@ -1,43 +1,8 @@
 # hpc-traffic-lights
 
-Parallel traffic light optimization using SLURM job arrays on PLGrid HPC infrastructure.
+Parallel traffic light optimization using SLURM job arrays on PLGrid/Ares HPC infrastructure.
 
-This project was prepared for the **Large Scale Computing** course. The main goal is to use traffic light management as a realistic computational use case for demonstrating HPC concepts such as batch processing, SLURM job arrays, parallel execution, resource usage analysis, and result aggregation.
-
-The project does not aim to build a production-ready smart city traffic control system. Instead, it provides a scalable prototype in which many traffic light configurations are evaluated in parallel on a computing cluster.
-
----
-
-## Project idea
-
-Large cities contain many intersections, traffic lights, sensors, and vehicles. Optimizing traffic light schedules can be computationally expensive because each candidate configuration has to be evaluated in a traffic simulation.
-
-In this project, each traffic light configuration is treated as an independent experiment. This makes the workload suitable for **embarrassingly parallel execution** using **SLURM array jobs**.
-
-The general workflow is:
-
-```text
-generate traffic light configurations
-        |
-        v
-run many independent simulations in parallel
-        |
-        v
-collect simulation metrics
-        |
-        v
-aggregate results
-        |
-        v
-select the best configuration
-        |
-        v
-visualize and analyze the results
-```
-
-Each traffic light configuration is evaluated by a **simulation backend**. The
-project ships with a simple, fully functional Python simulator and a clean path
-to switch to a SUMO backend later (see *Backend architecture* below).
+Prepared for the **Large Scale Computing** course. The goal is to demonstrate HPC concepts — batch processing, SLURM job arrays, parallel execution, resource analysis — using traffic light optimization as a realistic computational workload. Many independent traffic-light configurations are evaluated in parallel on a computing cluster; this is a textbook embarrassingly-parallel problem.
 
 ---
 
@@ -45,238 +10,487 @@ to switch to a SUMO backend later (see *Backend architecture* below).
 
 ```text
 hpc-traffic-lights/
-├── README.md
-├── requirements.txt
-├── .gitignore
-├── configs/              # traffic-light configurations (baseline + generated)
-├── data/                 # synthetic network & demand (see data/README.md)
-├── src/                  # all Python code
-│   ├── run_simulation.py     # central entry point (backend-agnostic)
-│   ├── generate_*.py         # network / demand / configs generators
-│   ├── aggregate_results.py  # combine result CSVs
-│   ├── select_best.py        # pick best configuration
-│   ├── optimize.py           # local orchestration / quick test
-│   ├── validate_outputs.py   # sanity checks
-│   ├── simulators/           # backends: base, python_simulator, sumo_simulator
-│   └── utils/                # io + metric schema helpers
-├── slurm/                # SLURM batch + array + aggregation scripts
-├── notebooks/            # analysis notebook (planned; see notebooks/README.md)
-├── results/              # simulation outputs (git-ignored)
-├── logs/                 # SLURM logs (git-ignored)
-├── tests/                # pytest smoke tests
-└── dashboard/            # optional Docker / Kubernetes dashboard
+├── data/network/grid3x3.net.xml   # SUMO network (3×3 grid, generated once)
+├── configs/                       # generated traffic-light configs (git-ignored)
+├── results/                       # simulation outputs + plots (git-ignored)
+├── logs/                          # SLURM logs (git-ignored)
+├── src/
+│   ├── run_simulation.py          # single entry point for all backends
+│   ├── generate_network.py        # build grid3x3.net.xml with netconvert
+│   ├── generate_configs.py        # random config generator
+│   ├── generate_demand.py         # synthetic demand JSON
+│   ├── aggregate_results.py       # merge result_*.csv → all.csv
+│   ├── select_best.py             # pick best config by metric
+│   ├── validate_outputs.py        # sanity-check result CSVs
+│   ├── ea_next_gen.py             # EA: selection + crossover + mutation
+│   ├── animate_sumo.py            # render FCD trace → GIF animation
+│   ├── plot_ea_progress.py        # EA convergence plots
+│   ├── simulators/
+│   │   ├── base.py                # SimulationBackend ABC
+│   │   ├── python_simulator.py    # pure-Python queueing model (no SUMO needed)
+│   │   ├── sumo_simulator.py      # SUMO backend (requires SUMO install)
+│   │   └── mc_simulator.py        # Monte Carlo π estimator
+│   ├── utils/
+│   │   ├── metrics.py             # RESULT_COLUMNS schema + compute_score()
+│   │   ├── io.py                  # shared helpers: ensure_dir, save_json, load_json
+│   │   └── network.py             # SUMO network XML parsers
+│   └── experiments/
+│       ├── generate_grid_configs.py   # grid search config generator
+│       ├── generate_mc_configs.py     # MC config generator
+│       ├── plot_scaling.py            # speedup + efficiency charts
+│       ├── plot_comparison.py         # EA vs Random vs Grid
+│       ├── plot_sensitivity.py        # pop_size × n_gen sensitivity
+│       └── plot_mc_convergence.py     # π convergence + log-log error
+├── slurm/
+│   ├── run_ea_single.sh           # self-contained EA job (all gens, one SLURM job)
+│   ├── run_comparison_pipeline.sh # submit Random + Grid + EA comparison
+│   ├── run_sensitivity_sweep.sh   # submit all 7 EA (pop,gen) combinations
+│   ├── run_scaling_sweep.sh       # submit scaling experiment for N=1…100
+│   ├── run_mc_array.sh            # MC array job (500 tasks)
+│   └── run_ea_pipeline.sh         # legacy: chain of array+step jobs (use ea_single instead)
+└── tests/                         # pytest smoke tests
 ```
 
 ---
 
-## Local setup
+## Prerequisites
+
+| Tool | Required for |
+|------|-------------|
+| Python 3.10+ | everything |
+| pip packages in `requirements.txt` | everything |
+| [SUMO](https://sumo.dlr.de/) ≥ 1.19 | `--backend sumo`, network generation, GIF animation |
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate      # Windows PowerShell: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-Every script is run from the **repository root** and works with plain
-`python src/<script>.py` (no installation/packaging step required).
+All scripts are run from the **repository root** with `python src/<script>.py`.
 
 ---
 
-## How to run (local workflow)
+## Quick start — full local workflow
 
-### 1. Generate network and demand
+Run these commands in order, once, to go from zero to plots on your local machine.
+
+### Step 1 — Generate the SUMO network (one-time)
 
 ```bash
-python src/generate_network.py
-python src/generate_demand.py
+python src/generate_network.py --sumo --output data/network/grid3x3.net.xml
 ```
 
-### 2. Generate configurations
+Creates a 3×3 grid road network used by all SUMO-backed experiments.
+
+### Step 2 — Generate traffic-light configs
 
 ```bash
-python src/generate_configs.py --n-configs 100 --output-dir configs --seed 123 --traffic-level medium
+python src/generate_configs.py \
+    --n-configs 50 \
+    --output-dir configs/gen_0 \
+    --seed 42 \
+    --network data/network/grid3x3.net.xml \
+    --traffic-level medium
 ```
 
-This writes `config_0000.json … config_0099.json`. Generation is deterministic
-for a given seed.
+Writes `configs/gen_0/config_0000.json … config_0049.json`.
+Config schema: `config_id, cycle_length, green_ns, green_ew, yellow_time, all_red_time, offset, traffic_level, simulation_duration, seed`.
+Constraint `green_ns + green_ew + 2·yellow_time + 2·all_red_time ≤ cycle_length` is always enforced.
 
-### 3. Run a single simulation
+### Step 3 — Run a single simulation
 
 ```bash
+# Python backend (no SUMO needed, fast)
 python src/run_simulation.py \
-  --backend python \
-  --config configs/config_0000.json \
-  --output results/result_0000.csv
-```
+    --backend python \
+    --config configs/gen_0/config_0000.json \
+    --output results/result_0000.csv
 
-### 4. Run the baseline
-
-```bash
+# SUMO backend (realistic, requires SUMO)
 python src/run_simulation.py \
-  --backend python \
-  --config configs/baseline.json \
-  --output results/baseline_metrics.csv \
-  --network data/network/simple_grid.json \
-  --demand data/demand/demand_medium.json
+    --backend sumo \
+    --config configs/gen_0/config_0000.json \
+    --network data/network/grid3x3.net.xml \
+    --output results/result_0000.csv
 ```
 
-### 5. Aggregate results
+Both produce one CSV row with the same schema (see *Output schema* below).
+
+### Step 4 — Aggregate results
 
 ```bash
-python src/aggregate_results.py --input-dir results --output results/all_results.csv
+python src/aggregate_results.py --input-dir results --output results/all.csv
 ```
 
-### 6. Select the best configuration
+### Step 5 — Select the best config
 
 ```bash
-python src/select_best.py --results results/all_results.csv --output results/best_config.json --metric avg_waiting_time
+python src/select_best.py \
+    --results results/all.csv \
+    --output results/best_config.json \
+    --metric avg_waiting_time
 ```
 
-### 7. Validate outputs
+### Step 6 — Validate outputs
 
 ```bash
-python src/validate_outputs.py --results results/all_results.csv
-```
-
-A quick end-to-end check on a laptop (no cluster needed):
-
-```bash
-python src/optimize.py --mode local-test --n-configs 5
+python src/validate_outputs.py --results results/all.csv
 ```
 
 ---
 
-## How to run (SLURM / HPC workflow)
+## Visualize the simulation (GIF animation)
 
-> The `--account` / `--partition` values in the SLURM scripts are PLGrid/Ares
-> **examples** and almost certainly need to be adjusted for your allocation.
+You can generate an animated GIF of vehicles moving through the grid intersection.
+**Requires SUMO** — the simulation must be run with `--fcd-output` to capture per-vehicle traces.
 
-```bash
-# 1) baseline (single job)
-sbatch slurm/run_baseline.sh
-
-# 2) evaluate many configs in parallel (job array; default 0-99)
-sbatch slurm/run_array.sh
-
-# 3) aggregate + select best + validate (run after the array finishes)
-sbatch slurm/run_aggregate.sh
-```
-
-Or submit the whole dependent pipeline at once:
+### 1. Run the simulation with trace output
 
 ```bash
-bash slurm/run_pipeline.sh
+mkdir -p results/vis
+python src/run_simulation.py \
+    --backend sumo \
+    --config results/best_config.json \
+    --network data/network/grid3x3.net.xml \
+    --output results/vis/best_result.csv \
+    --fcd-output results/vis/trace_best.xml
 ```
 
-The array size defaults to `0-99` for safety. To evaluate `config_0000..0499`,
-edit `#SBATCH --array=0-99` to `#SBATCH --array=0-499%50` in
-`slurm/run_array.sh` (the `%50` caps concurrency).
-
-### Estimate CPU-hours
-
-After a job (or array) completes:
+### 2. Generate the GIF
 
 ```bash
-./slurm/cpu_hours.sh <JOB_ID>
+python src/animate_sumo.py \
+    --fcd results/vis/trace_best.xml \
+    --network data/network/grid3x3.net.xml \
+    --config results/best_config.json \
+    --output results/plots/anim_best.gif \
+    --title "Best EA configuration"
 ```
 
-This sums `CPUTimeRAW` from `sacct` and prints total CPU-hours.
+### 3. Side-by-side comparison (best vs. random)
+
+```bash
+# First run a random (gen_0) config too
+python src/run_simulation.py \
+    --backend sumo \
+    --config configs/gen_0/config_0000.json \
+    --network data/network/grid3x3.net.xml \
+    --output results/vis/random_result.csv \
+    --fcd-output results/vis/trace_random.xml
+
+# Compare in one GIF
+python src/animate_sumo.py \
+    --fcd            results/vis/trace_random.xml \
+    --config         configs/gen_0/config_0000.json \
+    --title          "Random (gen 0)" \
+    --compare-fcd    results/vis/trace_best.xml \
+    --compare-config results/best_config.json \
+    --compare-title  "EA Best" \
+    --network        data/network/grid3x3.net.xml \
+    --output         results/plots/anim_compare.gif
+```
+
+---
+
+## Evolutionary Algorithm (EA) — local run
+
+EA iteratively improves a population of configs using truncation selection, uniform crossover, and Gaussian mutation.
+
+### Run EA locally (all generations in one go)
+
+```bash
+# Generate initial population (gen_0)
+python src/generate_configs.py \
+    --n-configs 50 \
+    --output-dir configs/ea/gen_0 \
+    --seed 42 \
+    --network data/network/grid3x3.net.xml \
+    --traffic-level medium
+
+# Evaluate gen_0
+mkdir -p results/ea/gen_0
+for i in $(seq 0 49); do
+    python src/run_simulation.py --backend python \
+        --config configs/ea/gen_0/config_$(printf '%04d' $i).json \
+        --output results/ea/gen_0/result_$(printf '%04d' $i).csv
+done
+python src/aggregate_results.py \
+    --input-dir results/ea/gen_0 --output results/ea/gen_0/all.csv
+
+# Breed gen_1 from gen_0
+python src/ea_next_gen.py \
+    --generation 0 \
+    --results-dir results/ea/gen_0 \
+    --config-dir  configs/ea/gen_0 \
+    --output-dir  configs/ea/gen_1 \
+    --pop-size 50 --seed 42
+
+# Repeat evaluate → breed for each subsequent generation
+```
+
+### Plot EA progress
+
+```bash
+python src/plot_ea_progress.py \
+    --results-dir results/ea \
+    --generations 6 \
+    --plot-dir results/plots
+```
+
+---
+
+## Experiments
+
+Four experiments are included. All results land in `results/` and plots in `results/plots/`.
+
+---
+
+### Experiment 1 — Scaling analysis
+
+Measures speedup and efficiency as the number of parallel workers increases (strong scaling: fixed 100 configs, vary N workers).
+
+#### On Ares (SLURM)
+
+```bash
+# Generate 100 configs once
+python src/generate_configs.py --n-configs 100 --output-dir configs/scaling \
+    --seed 1 --network data/network/grid3x3.net.xml --traffic-level medium
+
+# Submit all scaling levels (N = 1, 2, 5, 10, 20, 50, 100)
+bash slurm/run_scaling_sweep.sh
+```
+
+#### Plot (run locally after pulling results)
+
+```bash
+python src/experiments/plot_scaling.py \
+    --results-dir results/scaling \
+    --output-dir  results/plots
+# → results/plots/scaling.png
+```
+
+---
+
+### Experiment 2 — EA vs Random Search vs Grid Search
+
+Equal budget of 300 simulations per method. Which finds a better traffic-light schedule?
+
+#### On Ares (SLURM)
+
+```bash
+# Submits Random (300 tasks) + Grid (~72 tasks) + EA (50 individuals × 6 gen) simultaneously
+bash slurm/run_comparison_pipeline.sh
+```
+
+#### Plot (run locally after pulling results)
+
+```bash
+python src/experiments/plot_comparison.py \
+    --random  results/comparison/random/all.csv \
+    --grid    results/comparison/grid/all.csv \
+    --ea      results/comparison/ea/gen_5/all.csv \
+    --ea-dir  results/comparison/ea \
+    --output-dir results/plots
+# → results/plots/search_comparison.png
+```
+
+---
+
+### Experiment 3 — EA sensitivity analysis
+
+Fixed budget of 300 simulations; 7 combinations of `(pop_size, n_gen)`:
+
+| pop_size | n_gen | total sims |
+|----------|-------|-----------|
+| 300 | 1 | 300 |
+| 150 | 2 | 300 |
+| 100 | 3 | 300 |
+| 60  | 5 | 300 |
+| 50  | 6 | 300 |
+| 30  | 10 | 300 |
+| 15  | 20 | 300 |
+
+#### On Ares (SLURM)
+
+```bash
+bash slurm/run_sensitivity_sweep.sh
+```
+
+#### Plot (run locally after pulling results)
+
+```bash
+python src/experiments/plot_sensitivity.py \
+    --results-dir results/sensitivity \
+    --output-dir  results/plots
+# → results/plots/sensitivity.png
+```
+
+---
+
+### Experiment 4 — Monte Carlo π estimation
+
+Pure embarrassingly-parallel baseline (no SUMO needed). Each task estimates π by the hit-or-miss method. Used to compare ideal parallelism (MC) vs. barrier-synchronised parallelism (EA).
+
+#### On Ares (SLURM)
+
+```bash
+# Generate 500 MC configs (one-time)
+python src/experiments/generate_mc_configs.py \
+    --n-configs 500 --n-samples 100000 --output-dir configs/mc
+
+mkdir -p results/mc
+sbatch slurm/run_mc_array.sh
+```
+
+#### Plot (run locally after pulling results)
+
+```bash
+python src/experiments/plot_mc_convergence.py \
+    --results-dir results/mc \
+    --ea-dir      results/comparison/ea \
+    --output-dir  results/plots
+# → results/plots/mc_convergence.png
+```
+
+---
+
+### Generate all plots at once (after pulling results from Ares)
+
+```bash
+python src/experiments/plot_scaling.py \
+    --results-dir results/scaling --output-dir results/plots
+
+python src/experiments/plot_comparison.py \
+    --random  results/comparison/random/all.csv \
+    --grid    results/comparison/grid/all.csv \
+    --ea      results/comparison/ea/gen_5/all.csv \
+    --ea-dir  results/comparison/ea \
+    --output-dir results/plots
+
+python src/experiments/plot_sensitivity.py \
+    --results-dir results/sensitivity --output-dir results/plots
+
+python src/experiments/plot_mc_convergence.py \
+    --results-dir results/mc \
+    --ea-dir      results/comparison/ea \
+    --output-dir  results/plots
+```
+
+| Plot file | What it shows |
+|-----------|---------------|
+| `results/plots/scaling.png` | Speedup and efficiency vs. number of workers |
+| `results/plots/search_comparison.png` | Bar chart + CDF + learning curve: EA vs Random vs Grid |
+| `results/plots/sensitivity.png` | Best fitness vs pop\_size and n\_gen |
+| `results/plots/mc_convergence.png` | π convergence, log-log error, MC vs EA speedup |
+
+---
+
+## Full HPC workflow (Ares / PLGrid)
+
+End-to-end from a clean home directory on the cluster.
+
+```bash
+# 0. Upload the repo (from your local machine)
+#    git push origin final   (then on Ares:)
+git clone <repo-url>   # or: git pull origin final
+cd hpc-traffic-lights
+
+# 1. Create virtual environment
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Generate the SUMO network (one-time)
+python src/generate_network.py --sumo --output data/network/grid3x3.net.xml
+
+# 3. Run all four experiments (submit SLURM jobs)
+bash slurm/run_scaling_sweep.sh        # Experiment 1
+bash slurm/run_comparison_pipeline.sh  # Experiment 2
+bash slurm/run_sensitivity_sweep.sh    # Experiment 3
+
+python src/experiments/generate_mc_configs.py \
+    --n-configs 500 --n-samples 100000 --output-dir configs/mc
+mkdir -p results/mc
+sbatch slurm/run_mc_array.sh           # Experiment 4
+
+# 4. Monitor jobs
+squeue -u $USER
+
+# 5. After all jobs finish — commit results and push
+git add results/ configs/
+git commit -m "Add experiment results"
+git push origin final
+
+# 6. On your local machine — pull and plot
+git pull origin final
+python src/experiments/plot_scaling.py     --results-dir results/scaling    --output-dir results/plots
+python src/experiments/plot_comparison.py  --random results/comparison/random/all.csv --grid results/comparison/grid/all.csv --ea results/comparison/ea/gen_5/all.csv --ea-dir results/comparison/ea --output-dir results/plots
+python src/experiments/plot_sensitivity.py --results-dir results/sensitivity --output-dir results/plots
+python src/experiments/plot_mc_convergence.py --results-dir results/mc --ea-dir results/comparison/ea --output-dir results/plots
+```
 
 ---
 
 ## Backend architecture
 
-The key design rule: **nothing outside `src/simulators/` depends on how a
-simulator works internally.** A backend obeys one contract:
+The design rule: **nothing outside `src/simulators/` knows how a simulator works internally.**
 
-- **Input:** one JSON config (+ optional JSON network and demand files).
-- **Output:** one CSV file with exactly one row using a stable metric schema
-  (see `src/utils/metrics.py`).
-
-This is why the same command works for both backends:
+Every backend implements the same contract:
+- **Input:** one JSON config file (+ optional network path)
+- **Output:** one CSV row matching `RESULT_COLUMNS` from `src/utils/metrics.py`
 
 ```bash
-python src/run_simulation.py --backend python --config configs/config_0042.json --output results/result_0042.csv
-python src/run_simulation.py --backend sumo   --config configs/config_0042.json --output results/result_0042.csv
+# Both commands produce identical output format
+python src/run_simulation.py --backend python --config configs/gen_0/config_0000.json --output results/r.csv
+python src/run_simulation.py --backend sumo   --config configs/gen_0/config_0000.json --output results/r.csv --network data/network/grid3x3.net.xml
+python src/run_simulation.py --backend mc     --config configs/mc/config_0000.json    --output results/r.csv
 ```
 
-- ✅ **`python` backend** (`src/simulators/python_simulator.py`) — implemented
-  and fully functional. A simple discrete-time queueing model of one
-  intersection (NS / EW green phases, lost time for yellow + all-red).
-- 🚧 **`sumo` backend** (`src/simulators/sumo_simulator.py`) — **scaffolded
-  only**. The class and method signatures exist and document the planned steps
-  (generate SUMO XML, run `sumo -c simulation.sumocfg`, parse output into the
-  same CSV schema). It currently raises a clear `NotImplementedError`.
+| Backend | Description |
+|---------|-------------|
+| `python` | Discrete-time queueing model. Fast (~0.01 s/sim), no external dependencies. |
+| `sumo` | Realistic microscopic traffic simulation via SUMO. ~3 s/sim. Requires SUMO install. |
+| `mc` | Monte Carlo π estimator. Used for pure embarrassingly-parallel benchmarking. |
 
-Because both backends share the exact same input/output contract, switching to
-SUMO later will **not** require changing the SLURM array workflow, the
-aggregation/selection scripts, or the analysis notebook.
+### Adding a new backend
+
+1. Create `src/simulators/my_simulator.py` subclassing `SimulationBackend` from `src/simulators/base.py`
+2. Implement `run(config_path, output_path, network_path, demand_path)` — write exactly one CSV row
+3. Register it in the `BACKENDS` dict in `src/run_simulation.py`
 
 ### Output schema
 
-Every result CSV has exactly these columns:
+Every result CSV has these columns:
 
-```text
+```
 config_id, backend, traffic_level, cycle_length, green_ns, green_ew,
 yellow_time, all_red_time, offset, simulation_duration, seed,
-total_arrivals, total_departures, vehicles_remaining, avg_waiting_time,
-avg_queue_length, max_queue_length, total_stops, throughput,
-runtime_seconds, status
+total_arrivals, total_departures, vehicles_remaining,
+avg_waiting_time, avg_queue_length, max_queue_length,
+total_stops, throughput, runtime_seconds, status
 ```
+
+The objective is to minimise `avg_waiting_time`. The `status` column is `"ok"` on success or `"error"` on failure (SUMO backend never crashes — failures are recorded, not propagated).
 
 ---
 
 ## Tests
 
 ```bash
-pytest
+pytest                                        # all tests
+pytest tests/test_python_simulator.py         # single file
 ```
 
-The tests cover configuration constraints + determinism, the Python simulator
-output schema, and result aggregation (including skipping corrupted files).
-
 ---
 
-## Analysis stage (left for later)
-See `notebooks/README.md` for the planned steps: baseline-vs-best comparison,
-waiting-time distributions, runtime plots, CPU-hours estimation, and a scaling
-discussion. Figures should be saved into `results/plots/`.
+## SLURM scripts reference
 
----
-
-## Future development
-
-Things that can be done in the future:
-
-**Plug in a real traffic simulator (SUMO).** Swap our rough Python model for
-SUMO using the placeholder backend we already left — turn each JSON config into
-SUMO's XML, run `sumo -c simulation.sumocfg`, and read the output back into the
-same CSV. Done right, nothing else in the pipeline changes.
-
-**Use a real map instead of a toy grid.** Pull an actual road layout from
-OpenStreetMap instead of the synthetic grid — starting with one neighbourhood or
-the campus before attempting a whole city.
-
-**Try smarter optimization than random search.** Replace blind random search with
-an evolutionary algorithm that mutates and combines good configurations, maybe
-even an island model passing solutions between nodes via MPI.
-
-**Write the analysis notebook properly.** Compare baseline vs optimized, plot the
-waiting-time distribution and per-task runtimes, total up the CPU-hours, and
-comment on how the workload scales with more cores.
-
-**Make runs reproducible with containers.** Wrap the environment in Docker for
-easy local reproduction, plus an Apptainer/Singularity image for the cluster,
-where Docker usually isn't allowed.
-
-**Build out the little dashboard.** Grow the `dashboard/` placeholder into a page
-that actually shows the final plots and the winning configuration, deployed on a
-local Minikube.
-
-**Add some visualization of the traffic itself.** Actually *see* the best
-configuration running — a simple Matplotlib + ffmpeg animation, or rendering
-frames as a Blender job array if we're feeling ambitious.
-
-**Feed it real demand data.** Replace the made-up arrival rates with real traffic
-counts or a city's open-data portal, even if we only match rough daily patterns
-at first.
+| Script | Purpose |
+|--------|---------|
+| `slurm/run_ea_single.sh` | Self-contained EA: all generations inside one job, parallelism via background `&` + `wait`. Configure via env vars: `N_GEN`, `POP_SIZE`, `SEED`, `BACKEND`, `CONFIGS_BASE`, `OUTPUT_BASE`. |
+| `slurm/run_comparison_pipeline.sh` | Submit Random + Grid + EA comparison (equal 300-sim budget each). |
+| `slurm/run_sensitivity_sweep.sh` | Submit all 7 `(pop_size, n_gen)` EA variants. |
+| `slurm/run_scaling_sweep.sh` | Submit scaling experiment for N = 1, 2, 5, 10, 20, 50, 100 workers. |
+| `slurm/run_mc_array.sh` | 500-task MC array job (`--backend mc`). |
+| `slurm/run_ea_pipeline.sh` | Legacy chain of `afterok` dependencies (use `run_ea_single.sh` instead). |

@@ -1,5 +1,3 @@
-"""Tests for result aggregation."""
-
 import csv
 
 import pandas as pd

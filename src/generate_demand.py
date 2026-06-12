@@ -1,17 +1,11 @@
-"""Generate synthetic traffic demand for a given traffic level.
-Arrival rates are interpreted by the Python simulator as the expected number of
-vehicle arrivals per second per direction
-"""
-
 import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from utils.io import save_json  # noqa: E402
+from utils.io import save_json
 
-# Expected arrivals per second per direction, by traffic level.
 ARRIVAL_RATES = {
     "low": {"N": 0.10, "S": 0.10, "E": 0.12, "W": 0.12},
     "medium": {"N": 0.20, "S": 0.20, "E": 0.25, "W": 0.25},
@@ -22,7 +16,6 @@ DEFAULT_OUTPUT = os.path.join("data", "demand", "demand_medium.json")
 
 
 def build_demand(traffic_level):
-    """Build a demand dictionary for the requested traffic level."""
     rates = ARRIVAL_RATES[traffic_level]
     return {
         "demand_id": traffic_level,
@@ -47,9 +40,7 @@ def main(argv=None):
     args = parse_args(argv)
     demand = build_demand(args.traffic_level)
     save_json(demand, args.output)
-    print(
-        f"[generate_demand] wrote '{args.traffic_level}' demand to {args.output}"
-    )
+    print(f"[generate_demand] wrote '{args.traffic_level}' demand to {args.output}")
 
 
 if __name__ == "__main__":

@@ -1,13 +1,3 @@
-"""Validate aggregated simulation results.
-
-A lightweight sanity check used both locally and as part of the SLURM
-aggregation job. It verifies that the output schema and value ranges look
-reasonable before any analysis is done.
-
-Example
-    python src/validate_outputs.py --results results/all_results.csv
-"""
-
 import argparse
 import os
 import sys
@@ -20,7 +10,6 @@ from utils.metrics import RESULT_COLUMNS, NON_NEGATIVE_COLUMNS
 
 
 def validate(results_path):
-    """Run checks and return (ok: bool, problems: list[str])."""
     problems = []
 
     if not os.path.exists(results_path):
@@ -28,16 +17,13 @@ def validate(results_path):
 
     df = pd.read_csv(results_path)
 
-    # 1) Required columns exist.
     missing = [c for c in RESULT_COLUMNS if c not in df.columns]
     if missing:
         problems.append(f"missing required columns: {missing}")
 
-    # 2) status column present.
     if "status" not in df.columns:
         problems.append("missing 'status' column")
 
-    # 3) Non-negative numeric columns.
     for col in NON_NEGATIVE_COLUMNS:
         if col in df.columns:
             numeric = pd.to_numeric(df[col], errors="coerce")

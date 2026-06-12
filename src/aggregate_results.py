@@ -1,13 +1,3 @@
-"""Aggregate many per-configuration result CSVs into a single table.
-
-Reads every ``result_*.csv`` in the input directory, concatenates them, sorts
-by ``config_id`` when possible, and writes one combined CSV.
-
-Example
--------
-    python src/aggregate_results.py --input-dir results --output results/all_results.csv
-"""
-
 import argparse
 import glob
 import os
@@ -18,18 +8,17 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils.io import ensure_dir
+
 EXCLUDED_BASENAMES = {"all_results.csv", "baseline_metrics.csv"}
 
 
 def find_result_files(input_dir):
-    """Return sorted result_*.csv paths, excluding aggregate/baseline files."""
     pattern = os.path.join(input_dir, "result_*.csv")
     files = sorted(glob.glob(pattern))
     return [f for f in files if os.path.basename(f) not in EXCLUDED_BASENAMES]
 
 
 def aggregate(input_dir, output_path):
-    """Aggregate result files and write the combined CSV. Returns the DataFrame."""
     files = find_result_files(input_dir)
     frames = []
     skipped = 0

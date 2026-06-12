@@ -1,6 +1,7 @@
-# Core dependencies for the Python simulator backend and analysis.
-# Heavy / HPC-specific dependencies (e.g. SUMO) are intentionally NOT listed yet.
+# Core dependencies for the Python simulator backend, EA, and visualisation.
+# Heavy / HPC-specific dependencies (e.g. SUMO) are intentionally NOT listed here.
 numpy
 pandas
 matplotlib
+pillow
 pytest

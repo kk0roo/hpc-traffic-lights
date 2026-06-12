@@ -1,5 +1,3 @@
-"""Tests for the Python simulation backend."""
-
 import csv
 
 from simulators.python_simulator import PythonSimulator, simulate
@@ -34,12 +32,10 @@ def test_run_writes_valid_csv(tmp_path):
 
     assert len(rows) == 1
     row = rows[0]
-    # Schema check.
     for col in RESULT_COLUMNS:
         assert col in row
     assert row["status"] == "ok"
     assert row["backend"] == "python"
-    # Conservation: cannot depart more than arrived.
     assert int(row["total_arrivals"]) >= int(row["total_departures"])
     assert float(row["avg_waiting_time"]) >= 0
 

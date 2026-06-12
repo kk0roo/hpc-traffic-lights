@@ -1,5 +1,3 @@
-"""Tests for configuration generation: constraints and determinism."""
-
 from generate_configs import (
     generate_configs,
     make_config,

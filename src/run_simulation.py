@@ -1,36 +1,18 @@
-"""Central entry point: evaluate ONE traffic-light configuration.
-
-This is the single command the SLURM array workflow calls. It is backend
-agnostic -- switching ``--backend python`` to ``--backend sumo`` (once SUMO is
-implemented) requires no change to the surrounding workflow.
-
-Examples
-    python src/run_simulation.py \
-        --backend python \
-        --config configs/config_0000.json \
-        --output results/result_0000.csv
-
-    python src/run_simulation.py \
-        --backend python \
-        --config configs/baseline.json \
-        --output results/baseline_metrics.csv \
-        --network data/network/simple_grid.json \
-        --demand data/demand/demand_medium.json
-"""
-
 import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from utils.io import ensure_dir  # noqa: E402
-from simulators.python_simulator import PythonSimulator  # noqa: E402
-from simulators.sumo_simulator import SumoSimulator  # noqa: E402
+from utils.io import ensure_dir
+from simulators.python_simulator import PythonSimulator
+from simulators.sumo_simulator import SumoSimulator
+from simulators.mc_simulator import MCSimulator
 
 BACKENDS = {
     "python": PythonSimulator,
     "sumo": SumoSimulator,
+    "mc": MCSimulator,
 }
 
 
@@ -51,10 +33,16 @@ def parse_args(argv=None):
         "--output", required=True, help="Path of the CSV result file to write."
     )
     parser.add_argument(
-        "--network", default=None, help="Optional path to a JSON network file."
+        "--network", default=None, help="Optional path to a network file (JSON or SUMO net.xml)."
     )
     parser.add_argument(
         "--demand", default=None, help="Optional path to a JSON demand file."
+    )
+    parser.add_argument(
+        "--fcd-output",
+        default=None,
+        dest="fcd_output",
+        help="Optional path to write SUMO FCD XML for traffic animation.",
     )
     return parser.parse_args(argv)
 
@@ -79,11 +67,15 @@ def main(argv=None):
         f"[run_simulation] backend={args.backend} config={args.config} "
         f"-> output={args.output}"
     )
+    if args.fcd_output and args.backend != "sumo":
+        print("[run_simulation] WARNING: --fcd-output is only used by the sumo backend; ignoring.")
+
     backend.run(
         config_path=args.config,
         output_path=args.output,
         network_path=args.network,
         demand_path=args.demand,
+        fcd_output=args.fcd_output,
     )
     print(f"[run_simulation] done: wrote {args.output}")
 

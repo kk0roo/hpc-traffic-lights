@@ -1,9 +1,3 @@
-"""Pytest configuration: make the ``src/`` package importable in tests.
-
-This lets test modules do e.g. ``from simulators.python_simulator import ...``
-exactly like the scripts do when run as ``python src/script.py``.
-"""
-
 import os
 import sys
 
