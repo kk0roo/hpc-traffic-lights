@@ -1,0 +1,12 @@
+{
+  "config_id": 9,
+  "cycle_length": 95,
+  "green_ns": 71,
+  "green_ew": 12,
+  "yellow_time": 3,
+  "all_red_time": 2,
+  "offset": 60,
+  "traffic_level": "medium",
+  "simulation_duration": 3600,
+  "seed": 132
+}

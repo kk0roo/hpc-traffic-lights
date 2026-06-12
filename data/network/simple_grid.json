@@ -1,0 +1,106 @@
+{
+  "network_id": "simple_grid_3x3",
+  "rows": 3,
+  "cols": 3,
+  "intersections": [
+    {
+      "id": "I_0_0",
+      "row": 0,
+      "col": 0,
+      "incoming_directions": [
+        "N",
+        "S",
+        "E",
+        "W"
+      ]
+    },
+    {
+      "id": "I_0_1",
+      "row": 0,
+      "col": 1,
+      "incoming_directions": [
+        "N",
+        "S",
+        "E",
+        "W"
+      ]
+    },
+    {
+      "id": "I_0_2",
+      "row": 0,
+      "col": 2,
+      "incoming_directions": [
+        "N",
+        "S",
+        "E",
+        "W"
+      ]
+    },
+    {
+      "id": "I_1_0",
+      "row": 1,
+      "col": 0,
+      "incoming_directions": [
+        "N",
+        "S",
+        "E",
+        "W"
+      ]
+    },
+    {
+      "id": "I_1_1",
+      "row": 1,
+      "col": 1,
+      "incoming_directions": [
+        "N",
+        "S",
+        "E",
+        "W"
+      ]
+    },
+    {
+      "id": "I_1_2",
+      "row": 1,
+      "col": 2,
+      "incoming_directions": [
+        "N",
+        "S",
+        "E",
+        "W"
+      ]
+    },
+    {
+      "id": "I_2_0",
+      "row": 2,
+      "col": 0,
+      "incoming_directions": [
+        "N",
+        "S",
+        "E",
+        "W"
+      ]
+    },
+    {
+      "id": "I_2_1",
+      "row": 2,
+      "col": 1,
+      "incoming_directions": [
+        "N",
+        "S",
+        "E",
+        "W"
+      ]
+    },
+    {
+      "id": "I_2_2",
+      "row": 2,
+      "col": 2,
+      "incoming_directions": [
+        "N",
+        "S",
+        "E",
+        "W"
+      ]
+    }
+  ]
+}

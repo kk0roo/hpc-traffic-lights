@@ -1,0 +1,10 @@
+{
+  "demand_id": "medium",
+  "traffic_level": "medium",
+  "arrival_rates": {
+    "N": 0.2,
+    "S": 0.2,
+    "E": 0.25,
+    "W": 0.25
+  }
+}
